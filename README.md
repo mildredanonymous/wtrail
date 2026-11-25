@@ -21,7 +21,12 @@ Der Standardfilter ist `*.log`. Logzeilen werden berücksichtigt, wenn sie mit
 einem ISO-Zeitstempel beginnen und den internen Dienstnamen oder Anzeigenamen
 enthalten. UTF-8 sowie UTF-16 mit BOM werden unterstützt. Erkennbare
 Verknüpfungen und Offline-Platzhalter werden übersprungen und gemeldet.
-Ohne `--logs` erscheint die Dateisuche als ungeprüft.
+Ohne `--logs` prüft wtrail im Windows-Modus eine gleichnamige XML-Datei neben der
+EXE eines direkt konfigurierten Dienstes. Die XML muss zum internen Dienstnamen
+passen und genau einen expliziten `<logpath>` enthalten. Relative Pfade und
+`%BASE%` beziehen sich auf das Verzeichnis der XML-Datei. Wenn die Auflösung
+scheitert, bleiben Ereignistreffer sichtbar und die Dateisuche erscheint als
+ungeprüft. Ein expliziter `--logs`-Pfad hat Vorrang.
 
 Die native Windows-Dienstauflösung, Ereigniskanäle und Windows-spezifischen
 Pfadprüfungen stehen zur Abnahme aus.

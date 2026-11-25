@@ -13,25 +13,7 @@ static class LocalLogs
     {
         try
         {
-            if (OperatingSystem.IsWindows() &&
-                (input.StartsWith(@"\\") || input.StartsWith("//")))
-                throw new IOException("Netzwerk- und Gerätepfade werden übersprungen.");
-
-            var path = Path.GetFullPath(input);
-            var root = Path.GetPathRoot(path)!;
-            if (OperatingSystem.IsWindows() &&
-                (root.Length != 3 || root[1] != ':' || path.AsSpan(2).Contains(':') ||
-                 new DriveInfo(root).DriveType is not (DriveType.Fixed or DriveType.Removable or DriveType.Ram)))
-                throw new IOException("Erwartet wird ein Pfad auf einem lokalen Dateisystem.");
-
-            var segmentPath = root;
-            var attributes = CheckAttributes(segmentPath);
-            foreach (var segment in path[root.Length..].Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
-            {
-                segmentPath = Path.Combine(segmentPath, segment);
-                attributes = CheckAttributes(segmentPath);
-            }
+            var (path, attributes) = ResolveLocal(input);
 
             if (attributes.HasFlag(FileAttributes.Directory))
                 ReadDirectory(path);
@@ -99,6 +81,31 @@ static class LocalLogs
 
             sources.Add(new Source(file, true, "Datei geprüft"));
         }
+    }
+
+    internal static (string Path, FileAttributes Attributes) ResolveLocal(string input)
+    {
+        if (OperatingSystem.IsWindows() &&
+            (input.StartsWith(@"\\") || input.StartsWith("//")))
+            throw new IOException("Netzwerk- und Gerätepfade werden übersprungen.");
+
+        var path = Path.GetFullPath(input);
+        var root = Path.GetPathRoot(path)!;
+        if (OperatingSystem.IsWindows() &&
+            (root.Length != 3 || root[1] != ':' || path.AsSpan(2).Contains(':') ||
+             new DriveInfo(root).DriveType is not (DriveType.Fixed or DriveType.Removable or DriveType.Ram)))
+            throw new IOException("Erwartet wird ein Pfad auf einem lokalen Dateisystem.");
+
+        var segmentPath = root;
+        var attributes = CheckAttributes(segmentPath);
+        foreach (var segment in path[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            segmentPath = Path.Combine(segmentPath, segment);
+            attributes = CheckAttributes(segmentPath);
+        }
+
+        return (path, attributes);
     }
 
     private static FileAttributes CheckAttributes(string path)

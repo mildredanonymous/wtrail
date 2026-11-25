@@ -7,8 +7,8 @@ return Run(args);
 static int Run(string[] args)
 {
     const string help = """
-        wtrail incident DIENST --since 30m [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD [--file-glob MUSTER]]
-        wtrail incident DIENST --from ZEIT --to ZEIT [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD [--file-glob MUSTER]]
+        wtrail incident DIENST --since 30m [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
+        wtrail incident DIENST --from ZEIT --to ZEIT [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident Auftragsimport --demo complete|partial [--from UTC --to UTC]
         """;
     if (args is ["--help"] or ["incident", "--help"])

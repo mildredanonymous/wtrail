@@ -124,17 +124,28 @@ static class WindowsIncident
         }
 
         var fileHits = new List<WindowsHit>();
-        if (options.Logs is { } logPath)
+        var logPath = options.Logs;
+        if (logPath is null)
+        {
+            try
+            {
+                var configured = WinSwLogs.Resolve(serviceName);
+                logPath = configured.Path;
+                Console.WriteLine(safeText($"Logpfad aus WinSW-Konfiguration {configured.Configuration}: {logPath}"));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+                System.Security.SecurityException or System.Xml.XmlException or ArgumentException or NotSupportedException)
+            {
+                sources.Add(new Source("Dateisuche", false, $"ungeprüft ({error.Message})"));
+            }
+        }
+
+        if (logPath is not null)
         {
             LocalLogs.Read(logPath, options.FileGlob ?? "*.log", serviceName, displayName,
                 options.From, options.To, sources, (time, location, message) =>
                     fileHits.Add(new WindowsHit(time, location, null, null, 0, true, message, IsFile: true)));
         }
-        else
-        {
-            sources.Add(new Source("Dateisuche", false, "ungeprüft (kein --logs-Pfad angegeben)"));
-        }
-
         foreach (var hit in hits.Concat(fileHits).OrderBy(hit => hit.Time).ThenBy(hit => hit.Channel, StringComparer.Ordinal).ThenBy(hit => hit.RecordId))
         {
             if (hit.IsFile)
@@ -208,8 +219,7 @@ static class WindowsIncident
         if (channels.Count == 0)
             channels.AddRange(["System", "Application"]);
         var glob = values.GetValueOrDefault("--file-glob");
-        if (glob is not null && (!values.ContainsKey("--logs") ||
-            glob.IndexOfAny(['/', '\\', ':']) >= 0))
+        if (glob is not null && (glob.IndexOfAny(['/', '\\', ':']) >= 0))
             return false;
         options = new Options(from, to, channels.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
             values.GetValueOrDefault("--provider"), eventId, values.GetValueOrDefault("--logs"), glob);
