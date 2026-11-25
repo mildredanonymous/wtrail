@@ -25,3 +25,23 @@ integrierten Aufruf bis zur Auswertung der Resultate und prüft die beiden
 Originalfundstellen. Das ist eine Maschinenmessung für den vorbereiteten
 Kernfall. Angaben zur menschlichen Bedienzeit und zum Spitzenverbrauch des
 Arbeitsspeichers stehen aus.
+
+### Ergebnisse
+
+[Windows-CI mit ripgrep 16.0.0](https://github.com/mildredanonymous/wtrail/actions/runs/45696059978)
+bestanden. Eine exklusiv gesperrte Datei wurde als Suchlücke gemeldet. Bei
+fehlendem Logpfad blieb der echte Ereignistreffer sichtbar.
+
+| Messreihe | Median | Spannweite |
+|---|---:|---:|
+| rg und Get-WinEvent | 55,2 ms | 46,3–70,4 ms |
+| wtrail inklusive Start und JSONL-Auswertung | 211,1 ms | 201,8–224,2 ms |
+
+Für diesen kleinen CI-Fall ist 300 ms ein vorläufiger Richtwert zur
+Beobachtung von Regressionen. Die Messung sagt nichts über grössere Logs,
+unbekannte Logpfade oder die Zeit aus, die eine Person zum Auffinden der
+beiden Quellen benötigt.
+
+Vor der stabilen V1 stehen insbesondere die Messung von Speicherbedarf und
+Bedienzeit sowie die Windows-Prüfung der automatischen WinSW-Auflösung, langer
+Pfade, von Online-Platzhaltern und von Ctrl+C in PowerShell aus.
