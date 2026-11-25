@@ -1,63 +1,36 @@
-# Windows-Abnahme
+# Windows acceptance report
 
-## Windows 11 x64, lokal gebauter RC 1
+## Windows 11 x64
 
-Der Anwender hat den Build aus dem geklonten Repository erstellt und auf
-Windows 11 ausgeführt. Die genaue Windows-Buildnummer und PowerShell-Version
-dieses Laufs sind nicht erfasst.
+A user built RC 1 from the repository and exercised it on Windows 11. The exact OS build and PowerShell version were not captured.
 
-| Fall | Beobachtung |
-|---|---|
-| Vollständige Demo | Logzeile 2 und simuliertes System-Ereignis 4201 in Zeitreihenfolge, Exitcode 0 |
-| Zugriffsfehler in der Demo | Beide Fundstellen bleiben sichtbar, Application wird als unzugänglich gemeldet, Exitcode 3 |
-| Echter Kanal System | Dienst EventLog aufgelöst, System geprüft, keine Treffer im 15-Minuten-Fenster, Dateisuche ungeprüft, Exitcode 3 |
+| Check | Observed result |
+| --- | --- |
+| Complete demo | Application log line 2 and simulated System record 4201 in chronological order, exit code 0 |
+| Demo with a coverage gap | Both results remained visible, simulated access denial for Application, exit code 3 |
+| Real System channel | Resolved the EventLog service, checked System, found no events in the 15-minute window, and reported file coverage as unchecked, exit code 3 |
+| Interactive Ctrl+C in PowerShell | File search stopped during JSONL output and emitted a complete finish record with exit code 130. Windows CI separately verified the process exit code. |
 
-[Windows-Server-Abnahme des RC 1](https://github.com/mildredanonymous/wtrail/actions/runs/45692891283)
-lief unter Windows Server 2025 Build 26100 und PowerShell 7.6.10. Sie fand ein
-echtes Ereignis und die zugehörige Zeile in einer UTF-16-Datei.
+## Windows CI
 
-## Vergleichsmessung
+- A native test on Windows Server 2025 Build 26100 and PowerShell 7.6.10 found a real event and the corresponding line in a UTF-16 log. [End-to-end run](https://github.com/mildredanonymous/wtrail/actions/runs/45692891283)
+- An exclusively locked file was reported as a coverage gap. An event result remained visible when the log path was missing. [Access and coverage run](https://github.com/mildredanonymous/wtrail/actions/runs/45696059978)
+- Recursive search found a file beyond the 260-character path boundary. The tool skipped a local file marked offline before reading it. It read a WinSW-compatible configuration for a disabled test service, expanded `%BASE%` and gave an explicit `--logs` path precedence. [Path and WinSW run](https://github.com/mildredanonymous/wtrail/actions/runs/45696561360)
+- A Windows console signal interrupted live JSONL output for both `search` and `incident --demo`. Emitted lines remained valid JSON and both the finish record and the process returned 130. [Cancellation run](https://github.com/mildredanonymous/wtrail/actions/runs/45697357471)
 
-Die CI führt fünf Wiederholungen für denselben Testvorfall auf demselben
-Runner aus. Beide Varianten erhalten Dienstname, Zeitfenster, Ereigniskanal,
-Provider, Ereignis-ID und Logverzeichnis. Die Messung umfasst den jeweiligen
-integrierten Aufruf bis zur Auswertung der Resultate und prüft die beiden
-Originalfundstellen. Das ist eine Maschinenmessung für den vorbereiteten
-Kernfall. Angaben zur menschlichen Bedienzeit und zum Spitzenverbrauch des
-Arbeitsspeichers stehen aus.
+## Runtime comparison
 
-### Ergebnisse
+The CI benchmark runs both approaches five times on the same runner and checks that each returns the same event record and log line. Both receive the service name, time window, channel, provider, event ID and log directory. Timing covers the command sequence through result processing.
 
-[Windows-CI mit ripgrep 16.0.0](https://github.com/mildredanonymous/wtrail/actions/runs/45696059978)
-bestanden. Eine exklusiv gesperrte Datei wurde als Suchlücke gemeldet. Bei
-fehlendem Logpfad blieb der echte Ereignistreffer sichtbar.
+| Approach | Median | Range |
+| --- | ---: | ---: |
+| ripgrep 16.0.0 and Get-WinEvent | 55.2 ms | 46.3–70.4 ms |
+| wtrail including startup and JSONL parsing | 211.1 ms | 201.8–224.2 ms |
 
-| Messreihe | Median | Spannweite |
-|---|---:|---:|
-| rg und Get-WinEvent | 55,2 ms | 46,3–70,4 ms |
-| wtrail inklusive Start und JSONL-Auswertung | 211,1 ms | 201,8–224,2 ms |
+For this small CI case, 300 ms is a provisional reference for tracking regressions. The benchmark uses a known log path and a small fixture. [Benchmark run](https://github.com/mildredanonymous/wtrail/actions/runs/45696059978)
 
-Für diesen kleinen CI-Fall ist 300 ms ein vorläufiger Richtwert zur
-Beobachtung von Regressionen. Die Messung sagt nichts über grössere Logs,
-unbekannte Logpfade oder die Zeit aus, die eine Person zum Auffinden der
-beiden Quellen benötigt.
+## Open for stable release
 
-## Weitere Windows-Prüfungen
-
-[Windows-CI für Pfade und WinSW](https://github.com/mildredanonymous/wtrail/actions/runs/45696561360)
-bestanden. Die rekursive Suche fand eine Datei hinter der 260-Zeichen-Grenze.
-Eine lokale Datei mit Offline-Attribut wurde vor dem Lesen übersprungen.
-Für einen temporär registrierten, deaktivierten Testdienst fand wtrail die
-WinSW-kompatible XML neben dem konfigurierten EXE-Pfad, löste `%BASE%` auf und
-meldete die Konfigurationsquelle. `--logs` hatte Vorrang. Der Dienst wurde
-für die Prüfung der Konfiguration nicht gestartet.
-
-[Windows-CI für Ctrl+C](https://github.com/mildredanonymous/wtrail/actions/runs/45697357471)
-bestanden. Ein natives Windows-Konsolensignal wurde während der laufenden
-JSONL-Ausgabe an `search` und an `incident --demo` gesendet. In beiden Fällen
-blieben alle Zeilen gültiges JSON und der Abschluss sowie der Prozess
-meldeten Exitcode 130. Die interaktive Tastatureingabe in einem
-Windows-11-PowerShell-Fenster wurde dabei nicht geprüft.
-
-Vor der stabilen V1 stehen die Messung von Speicherbedarf und Bedienzeit
-sowie die Abnahme mit einem echten Cloud-Platzhalter aus.
+- Test a real cloud placeholder and check for unwanted hydration.
+- Measure peak memory and the time a person needs to locate both original results.
+- Publish a stable Windows x64 package. The release candidate is currently distributed as an Actions artifact.
