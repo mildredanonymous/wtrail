@@ -48,3 +48,16 @@ das Zeitlimit überschreitet, erzeugt eine Suchlücke für die betroffene Datei.
 JSONL verwendet die Felder `version`, `type` und `data`. Der letzte Datensatz
 enthält den Exitcode und die Anzahl Treffer. Bei einem verarbeiteten
 `Ctrl+C` endet die Dateisuche mit Code 130.
+
+## Vorfallausgabe
+
+```powershell
+dotnet run -- incident Auftragsimport --demo partial --order found --format jsonl
+```
+
+`incident` sortiert standardmässig nach Zeit. Dienstbezogene Fundstellen ohne
+verlässliche Zeit erscheinen danach mit dem Hinweis «Zeit ungeklärt».
+`--order found` gibt Fundstellen direkt in Fundreihenfolge aus.
+`--format jsonl` verwendet die Felder `version`, `type` und `data` für Start,
+Treffer, Quellenstatus und Abschluss. Bei verarbeitetem Abbruch meldet der
+Abschluss Exitcode 130.

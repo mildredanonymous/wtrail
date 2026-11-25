@@ -10,22 +10,25 @@ static class LocalLogs
 
     internal static void Read(string input, string glob, string serviceName, string displayName,
         DateTimeOffset from, DateTimeOffset to, List<Source> sources,
-        Action<DateTimeOffset, string, string> emit)
+        Action<IncidentHit> emit, CancellationToken cancellation)
     {
         Walk(input, glob, sources.Add, (file, reader) =>
         {
             long lineNumber = 0;
             while (reader.ReadLine() is { } line)
             {
+                cancellation.ThrowIfCancellationRequested();
                 lineNumber++;
                 var separator = line.IndexOfAny([' ', '\t']);
-                if (separator > 0 && WindowsIncident.TryTime(line[..separator], out var time) &&
-                    time >= from && time < to &&
-                    (line.AsSpan(separator + 1).Contains(serviceName, StringComparison.OrdinalIgnoreCase) ||
-                     line.AsSpan(separator + 1).Contains(displayName, StringComparison.OrdinalIgnoreCase)))
-                    emit(time, $"{file}:{lineNumber}", line[(separator + 1)..]);
+                if (!line.Contains(serviceName, StringComparison.OrdinalIgnoreCase) &&
+                    !line.Contains(displayName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (separator <= 0 || !WindowsIncident.TryTime(line[..separator], out var time))
+                    emit(new IncidentHit(null, true, line, Path: file, Line: lineNumber));
+                else if (time >= from && time < to)
+                    emit(new IncidentHit(time, true, line[(separator + 1)..], Path: file, Line: lineNumber));
             }
-        });
+        }, cancellation);
     }
 
     internal static void Walk(string input, string glob, Action<Source> report,

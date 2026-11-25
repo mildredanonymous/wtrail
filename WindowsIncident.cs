@@ -7,25 +7,27 @@ using System.Xml.Linq;
 
 static class WindowsIncident
 {
-    public static int Run(string service, string[] arguments, Func<string, string> safeText)
+    public static int Run(string service, string[] arguments, IncidentOutput output)
     {
         if (!TryParse(arguments, DateTimeOffset.UtcNow, out var options))
         {
-            Console.Error.WriteLine("Erwartet: --since (z. B. 30m) oder --from und --to mit ISO-Zeit. Siehe wtrail --help.");
+            output.Start(service, null, null, false);
+            output.Error("Erwartet: --since (z. B. 30m) oder --from und --to mit ISO-Zeit. Siehe wtrail --help.");
             return 2;
         }
 
+        output.Start(service, options!.From, options.To, false);
         if (!OperatingSystem.IsWindows())
         {
-            Console.Error.WriteLine("Die lokale Dienst- und Ereignissuche benötigt Windows. Für Testdaten steht --demo zur Verfügung.");
+            output.Error("Die lokale Dienst- und Ereignissuche benötigt Windows. Für Testdaten steht --demo zur Verfügung.");
             return 2;
         }
 
-        return ReadWindows(service, options!, safeText);
+        return ReadWindows(service, options, output);
     }
 
     [SupportedOSPlatform("windows")]
-    private static int ReadWindows(string service, Options options, Func<string, string> safeText)
+    private static int ReadWindows(string service, Options options, IncidentOutput output)
     {
         string serviceName;
         string displayName;
@@ -38,9 +40,9 @@ static class WindowsIncident
                     Matches(candidate.ServiceName, service) || Matches(candidate.DisplayName, service)).ToArray();
                 if (matches.Length != 1)
                 {
-                    Console.Error.WriteLine(matches.Length == 0 ? "Dienst nicht gefunden." : "Dienstname mehrdeutig:");
-                    foreach (var candidate in matches.OrderBy(candidate => candidate.ServiceName, StringComparer.OrdinalIgnoreCase))
-                        Console.Error.WriteLine(safeText($"{candidate.ServiceName} ({candidate.DisplayName})"));
+                    output.Error(matches.Length == 0 ? "Dienst nicht gefunden." : "Dienstname mehrdeutig:",
+                        matches.OrderBy(candidate => candidate.ServiceName, StringComparer.OrdinalIgnoreCase)
+                            .Select(candidate => $"{candidate.ServiceName} ({candidate.DisplayName})").ToArray());
                     return 2;
                 }
 
@@ -55,17 +57,25 @@ static class WindowsIncident
         }
         catch (Exception error) when (error is Win32Exception or InvalidOperationException or UnauthorizedAccessException)
         {
-            Console.Error.WriteLine(safeText($"Dienstauflösung fehlgeschlagen: {error.Message}"));
+            output.Error($"Dienstauflösung fehlgeschlagen: {error.Message}");
             return 2;
         }
 
-        Console.WriteLine(safeText($"{serviceName} ({displayName}) · [{options.From.UtcDateTime:O}, {options.To.UtcDateTime:O}) UTC"));
-        var hits = new List<WindowsHit>();
+        output.Source(new Source(serviceName, true, $"Dienst aufgelöst ({displayName})"));
+        var count = 0;
         var sources = new List<Source>();
+
+        void Emit(IncidentHit hit)
+        {
+            output.Result(hit);
+            count++;
+        }
+
         var timeQuery = FormattableString.Invariant(
             $"*[System[TimeCreated[@SystemTime >= '{options.From.UtcDateTime:O}' and @SystemTime < '{options.To.UtcDateTime:O}']]]");
         foreach (var channel in options.Channels)
         {
+            output.Cancellation.ThrowIfCancellationRequested();
             var incomplete = false;
             try
             {
@@ -74,6 +84,7 @@ static class WindowsIncident
                 {
                     using (entry)
                     {
+                        output.Cancellation.ThrowIfCancellationRequested();
                         if (options.Provider is { } provider && !Matches(entry.ProviderName, provider) ||
                             options.EventId is { } id && entry.Id != id)
                             continue;
@@ -81,13 +92,9 @@ static class WindowsIncident
                         var xml = XElement.Parse(entry.ToXml());
                         var ns = xml.Name.Namespace;
                         var timestamp = (string?)xml.Element(ns + "System")?.Element(ns + "TimeCreated")?.Attribute("SystemTime");
-                        if (!TryTime(timestamp, out var time))
-                        {
-                            incomplete = true;
-                            continue;
-                        }
-
-                        if (time < options.From || time >= options.To)
+                        DateTimeOffset? time = TryTime(timestamp, out var parsedTime) ? parsedTime : null;
+                        incomplete |= time is null;
+                        if (time is { } reliable && (reliable < options.From || reliable >= options.To))
                             continue;
 
                         var fields = xml.Elements()
@@ -95,6 +102,8 @@ static class WindowsIncident
                             .SelectMany(element => element.Descendants().Where(field => !field.HasElements))
                             .Select(field => field.Value).ToArray();
                         var direct = fields.Any(field => Matches(field, serviceName) || Matches(field, displayName));
+                        if (time is null && !direct)
+                            continue;
                         string? message;
                         try
                         {
@@ -109,7 +118,7 @@ static class WindowsIncident
                         var details = string.IsNullOrWhiteSpace(message)
                             ? $"Meldungstext fehlt. Ereignisdaten: {string.Join(" | ", fields)}"
                             : message;
-                        hits.Add(new WindowsHit(time, channel, entry.RecordId, entry.ProviderName, entry.Id, direct, details));
+                        Emit(new IncidentHit(time, direct, details, channel, entry.RecordId, entry.ProviderName, entry.Id));
                     }
                 }
 
@@ -123,7 +132,6 @@ static class WindowsIncident
             }
         }
 
-        var fileHits = new List<WindowsHit>();
         var logPath = options.Logs;
         if (logPath is null)
         {
@@ -131,7 +139,7 @@ static class WindowsIncident
             {
                 var configured = WinSwLogs.Resolve(serviceName);
                 logPath = configured.Path;
-                Console.WriteLine(safeText($"Logpfad aus WinSW-Konfiguration {configured.Configuration}: {logPath}"));
+                output.Source(new Source(configured.Configuration, true, $"Logpfad aus WinSW-Konfiguration: {logPath}"));
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or
                 System.Security.SecurityException or System.Xml.XmlException or ArgumentException or NotSupportedException)
@@ -143,25 +151,11 @@ static class WindowsIncident
         if (logPath is not null)
         {
             LocalLogs.Read(logPath, options.FileGlob ?? "*.log", serviceName, displayName,
-                options.From, options.To, sources, (time, location, message) =>
-                    fileHits.Add(new WindowsHit(time, location, null, null, 0, true, message, IsFile: true)));
+                options.From, options.To, sources, Emit, output.Cancellation);
         }
-        foreach (var hit in hits.Concat(fileHits).OrderBy(hit => hit.Time).ThenBy(hit => hit.Channel, StringComparer.Ordinal).ThenBy(hit => hit.RecordId))
-        {
-            if (hit.IsFile)
-            {
-                Console.WriteLine(safeText($"{hit.Time:O}  {hit.Channel}  Diensttreffer  {hit.Message}"));
-                continue;
-            }
-
-            var relation = hit.Direct ? "Diensttreffer" : "Zeitlicher Kontext";
-            Console.WriteLine(safeText(
-                $"{hit.Time:O}  {hit.Channel}, Datensatz-ID {hit.RecordId}  {relation}  {hit.Provider}, Ereignis-ID {hit.Id}  {hit.Message}"));
-        }
-
         foreach (var source in sources)
-            Console.WriteLine(safeText($"{source.Name} — {source.Status}"));
-        var found = hits.Count + fileHits.Count > 0;
+            output.Source(source);
+        var found = count > 0;
         if (sources.Any(source => !source.Checked))
             return found || sources.Any(source => source.Checked) ? 3 : 2;
         return found ? 0 : 1;
@@ -244,6 +238,4 @@ static class WindowsIncident
 
     private sealed record Options(DateTimeOffset From, DateTimeOffset To, string[] Channels, string? Provider, int? EventId,
         string? Logs, string? FileGlob);
-    private sealed record WindowsHit(DateTimeOffset Time, string Channel, long? RecordId, string? Provider,
-        int Id, bool Direct, string Message, bool IsFile = false);
 }

@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -11,6 +12,7 @@ static int Run(string[] args)
         wtrail incident DIENST --since 30m [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident DIENST --from ZEIT --to ZEIT [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident Auftragsimport --demo complete|partial [--from UTC --to UTC]
+        incident: [--order time|found] [--format jsonl]
         """;
     if (args is ["--help"] or ["incident", "--help"])
     {
@@ -21,26 +23,101 @@ static int Run(string[] args)
     if (args.Length > 0 && args[0] == "search")
         return FileSearch.Run(args[1..], SafeText, help);
 
-    if (args.Length >= 2 && args[0] == "incident" && !args[1].StartsWith("--", StringComparison.Ordinal)
-        && (args.Length < 3 || args[2] != "--demo"))
-        return WindowsIncident.Run(args[1], args[2..], SafeText);
+    if (args.Length > 0 && args[0] == "incident")
+        return RunIncident(args[1..], help);
+    Console.Error.WriteLine(help);
+    return 2;
+}
 
-    if (args.Length is not (4 or 8) || args[0] != "incident" ||
-        !args[1].Equals("Auftragsimport", StringComparison.OrdinalIgnoreCase) ||
-        args[2] != "--demo" || args[3] is not ("complete" or "partial"))
+static int RunIncident(string[] args, string help)
+{
+    var remaining = new List<string>();
+    var json = false;
+    var streaming = false;
+    var valid = true;
+    var seen = new HashSet<string>();
+    if (args.Length > 0)
+        remaining.Add(args[0]);
+    for (var index = 1; index < args.Length; index += 2)
     {
-        Console.Error.WriteLine(help);
+        var key = args[index];
+        if (index + 1 >= args.Length)
+        {
+            valid = false;
+            break;
+        }
+        var value = args[index + 1];
+        if (key is "--format" or "--order")
+        {
+            valid &= seen.Add(key);
+            if (key == "--format")
+            {
+                json |= value == "jsonl";
+                valid &= value == "jsonl";
+            }
+            else
+            {
+                streaming = value == "found";
+                valid &= streaming || value == "time";
+            }
+            continue;
+        }
+        remaining.Add(key);
+        remaining.Add(value);
+    }
+
+    var service = args.FirstOrDefault() ?? "";
+    var demo = remaining.Count >= 2 && remaining[1] == "--demo";
+    using var cancellation = new CancellationTokenSource();
+    var output = new IncidentOutput(json, streaming, SafeText, cancellation.Token);
+    ConsoleCancelEventHandler cancel = (_, signal) =>
+    {
+        signal.Cancel = true;
+        cancellation.Cancel();
+    };
+    Console.CancelKeyPress += cancel;
+    try
+    {
+        if (!valid || string.IsNullOrWhiteSpace(service) || service.StartsWith("--", StringComparison.Ordinal))
+        {
+            output.Start(service, null, null, demo);
+            output.Error(help);
+            return output.Finish(2);
+        }
+        var code = demo ? RunDemo(remaining.ToArray(), output, help)
+            : WindowsIncident.Run(service, remaining.Skip(1).ToArray(), output);
+        return output.Finish(code);
+    }
+    catch (OperationCanceledException)
+    {
+        return output.Finish(130);
+    }
+    finally
+    {
+        Console.CancelKeyPress -= cancel;
+    }
+}
+
+static int RunDemo(string[] args, IncidentOutput output, string help)
+{
+    if (args.Length is not (3 or 7) ||
+        !args[0].Equals("Auftragsimport", StringComparison.OrdinalIgnoreCase) ||
+        args[1] != "--demo" || args[2] is not ("complete" or "partial"))
+    {
+        output.Start(args[0], null, null, true);
+        output.Error(help);
         return 2;
     }
 
     var from = ParseTime("2026-01-15T09:14:00Z");
     var to = ParseTime("2026-01-15T09:16:00Z");
-    if (args.Length == 8)
+    if (args.Length == 7)
     {
-        if (args[4] != "--from" || args[6] != "--to" ||
-            ParseTime(args[5]) is not { } start || ParseTime(args[7]) is not { } end || start >= end)
+        if (args[3] != "--from" || args[5] != "--to" ||
+            ParseTime(args[4]) is not { } start || ParseTime(args[6]) is not { } end || start >= end)
         {
-            Console.Error.WriteLine("Erwartet wird ein gültiges Zeitfenster in UTC, z. B. 2026-01-15T09:15:00Z.");
+            output.Start(args[0], null, null, true);
+            output.Error("Erwartet wird ein gültiges Zeitfenster in UTC, z. B. 2026-01-15T09:15:00Z.");
             return 2;
         }
 
@@ -48,15 +125,15 @@ static int Run(string[] args)
         to = end;
     }
 
-    Console.WriteLine($"Synthetischer Vorfall Auftragsimport · [{from:O}, {to:O})");
+    output.Start(args[0], from, to, true);
 
     var root = Path.Combine(AppContext.BaseDirectory, "fixtures", "auftragsimport");
-    var hits = new List<Hit>();
+    var count = 0;
     var sources = new List<Source>();
     try
     {
         using var data = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "events.json")));
-        var scenario = data.RootElement.GetProperty("scenarios").GetProperty(args[3]);
+        var scenario = data.RootElement.GetProperty("scenarios").GetProperty(args[2]);
         foreach (var channel in scenario.EnumerateObject())
         {
             sources.Add(channel.Value.GetString() == "checked"
@@ -66,16 +143,18 @@ static int Run(string[] args)
 
         foreach (var entry in data.RootElement.GetProperty("events").EnumerateArray())
         {
+            output.Cancellation.ThrowIfCancellationRequested();
             var channel = entry.GetProperty("channel").GetString();
             if (scenario.GetProperty(channel!).GetString() != "checked" ||
-                !string.Equals(entry.GetProperty("serviceName").GetString(), args[1], StringComparison.OrdinalIgnoreCase))
+                !string.Equals(entry.GetProperty("serviceName").GetString(), args[0], StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var time = ParseTime(entry.GetProperty("timestamp").GetString()!);
-            if (time is { } timestamp && timestamp >= from && timestamp < to)
+            if (time is null || (time >= from && time < to))
             {
                 var id = entry.GetProperty("recordId").GetInt64();
-                hits.Add(new Hit(timestamp, $"{channel}, Datensatz-ID {id}", entry.GetProperty("message").GetString()!));
+                output.Result(new IncidentHit(time, true, entry.GetProperty("message").GetString()!, channel, id));
+                count++;
             }
         }
     }
@@ -83,7 +162,7 @@ static int Run(string[] args)
         or KeyNotFoundException or InvalidOperationException or FormatException)
     {
         sources.Clear();
-        hits.Clear();
+
         sources.Add(new Source("Ereignisdaten", false, error.Message));
     }
 
@@ -93,14 +172,16 @@ static int Run(string[] args)
         var lineNumber = 0;
         foreach (var line in File.ReadLines(path))
         {
+            output.Cancellation.ThrowIfCancellationRequested();
             lineNumber++;
             var separator = line.IndexOf(' ');
             if (separator > 0 && ParseTime(line[..separator]) is { } timestamp &&
                 timestamp >= from && timestamp < to &&
                 line.Contains(" ERROR ", StringComparison.Ordinal) &&
-                line.Contains(args[1], StringComparison.OrdinalIgnoreCase))
+                line.Contains(args[0], StringComparison.OrdinalIgnoreCase))
             {
-                hits.Add(new Hit(timestamp, $"{path}:{lineNumber}", line[(separator + 1)..]));
+                output.Result(new IncidentHit(timestamp, true, line[(separator + 1)..], Path: path, Line: lineNumber));
+                count++;
             }
         }
 
@@ -111,18 +192,14 @@ static int Run(string[] args)
         sources.Add(new Source(path, false, error.Message));
     }
 
-    foreach (var hit in hits.OrderBy(hit => hit.Time))
-        Console.WriteLine(SafeText($"{hit.Time:O}  {hit.Location}  {hit.Message}"));
-
     foreach (var source in sources)
-        Console.WriteLine(SafeText($"{source.Name} — {source.Status}"));
+        output.Source(source);
 
-    Console.WriteLine($"Treffer: {hits.Count}");
-    if (!sources.Any(source => source.Checked) && hits.Count == 0)
+    if (!sources.Any(source => source.Checked) && count == 0)
         return 2;
     if (sources.Any(source => !source.Checked))
         return 3;
-    return hits.Count == 0 ? 1 : 0;
+    return count == 0 ? 1 : 0;
 }
 
 static DateTimeOffset? ParseTime(string value) =>
@@ -132,5 +209,4 @@ static DateTimeOffset? ParseTime(string value) =>
 static string SafeText(string value) =>
     Regex.Replace(value, @"[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]", match => $"\\u{(int)match.Value[0]:X4}");
 
-record Hit(DateTimeOffset Time, string Location, string Message);
 record Source(string Name, bool Checked, string Status);
