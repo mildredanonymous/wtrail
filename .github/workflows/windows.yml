@@ -15,9 +15,12 @@ jobs:
       - name: Publish self-contained Windows x64 build
         shell: pwsh
         run: dotnet publish -c Release -r win-x64 --self-contained -p:Version=1.0.0-rc.1 -o "$env:RUNNER_TEMP/wtrail-package"
+      - name: Install ripgrep for the benchmark
+        shell: pwsh
+        run: choco install ripgrep --version=14.1.1 --yes --no-progress
       - name: Run Windows acceptance
         shell: pwsh
-        run: ./scripts/Test-Windows.ps1 -Executable "$env:RUNNER_TEMP/wtrail-package/wtrail.exe"
+        run: ./scripts/Test-Windows.ps1 -Executable "$env:RUNNER_TEMP/wtrail-package/wtrail.exe" -Benchmark
       - name: Package verified build
         shell: pwsh
         run: |

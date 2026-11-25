@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)]
-    [string] $Executable
+    [string] $Executable,
+    [switch] $Benchmark
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -40,12 +41,21 @@ try {
     }
     $null = Invoke-Trail 1 @('search','kein Treffer',$temporary,'--format','jsonl')
     $null = Invoke-Trail 2 @('search','kein Treffer',(Join-Path $temporary 'fehlt'),'--format','jsonl')
+    $lock = [IO.File]::Open($log, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    try {
+        $locked = Invoke-Trail 3 @('search','kein Treffer',$temporary,'--format','jsonl')
+        if (-not ($locked | Where-Object { $_.type -eq 'source' -and $_.data.path -eq $log -and -not $_.data.checked })) {
+            throw 'Gesperrte Datei wurde nicht als Suchlücke gemeldet.'
+        }
+    }
+    finally { $lock.Dispose() }
     & eventcreate.exe /T ERROR /ID 901 /L APPLICATION /SO wtrail-smoke /D "$($service.Name) $marker"
     if ($LASTEXITCODE -ne 0) { throw 'Testereignis konnte nicht geschrieben werden.' }
     $event = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'wtrail-smoke'; Id = 901 } -MaxEvents 1
+    $to = [DateTimeOffset]::UtcNow.AddSeconds(1)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $actual = Invoke-Trail 0 @('incident',$service.Name,'--from',$from.ToString('o'),'--to',
-        [DateTimeOffset]::UtcNow.AddSeconds(1).ToString('o'),'--channel','Application',
+        $to.ToString('o'),'--channel','Application',
         '--provider','wtrail-smoke','--event-id','901','--logs',$temporary,'--format','jsonl')
     $watch.Stop()
     $results = @($actual | Where-Object type -eq 'result')
@@ -54,6 +64,44 @@ try {
         throw 'Der native Vorfall enthält nicht beide erwarteten Originalfundstellen.'
     }
     Write-Host "Windows-End-to-End bestanden, Suchlauf inklusive Prozessstart: $($watch.ElapsedMilliseconds) ms."
+    $missing = Invoke-Trail 3 @('incident',$service.Name,'--from',$from.ToString('o'),'--to',
+        $to.ToString('o'),'--channel','Application','--provider','wtrail-smoke','--event-id','901',
+        '--logs',(Join-Path $temporary 'fehlt'),'--format','jsonl')
+    if (-not ($missing | Where-Object { $_.type -eq 'result' -and $_.data.RecordId -eq $event.RecordId })) {
+        throw 'Ein fehlender Dateipfad hat den Ereignistreffer unterdrückt.'
+    }
+
+    if ($Benchmark) {
+        $rg = (Get-Command rg -ErrorAction Stop).Source
+        & $rg --version | Select-Object -First 1
+        $trialArgs = @('incident',$service.Name,'--from',$from.ToString('o'),'--to',$to.ToString('o'),
+            '--channel','Application','--provider','wtrail-smoke','--event-id','901','--logs',$temporary,'--order','found','--format','jsonl')
+        $filter = @{ LogName = 'Application'; ProviderName = 'wtrail-smoke'; Id = 901;
+            StartTime = $from.LocalDateTime; EndTime = $to.LocalDateTime }
+        for ($trial = 1; $trial -le 5; $trial++) {
+            $watch.Restart()
+            $baselineEvent = Get-WinEvent -FilterHashtable $filter |
+                Where-Object { $_.TimeCreated.ToUniversalTime() -lt $to.UtcDateTime -and $_.Message.Contains($service.Name) } |
+                Select-Object -First 1
+            $baselineLine = & $rg --fixed-strings --line-number --with-filename --glob '*.log' $service.Name $temporary
+            $watch.Stop()
+            $baselineMs = $watch.Elapsed.TotalMilliseconds
+            if ($LASTEXITCODE -ne 0 -or $baselineEvent.RecordId -ne $event.RecordId -or
+                -not ($baselineLine -like "*$([IO.Path]::GetFileName($log)):1:*")) {
+                throw 'Vergleichsmessung hat nicht beide Originalfundstellen geliefert.'
+            }
+
+            $watch.Restart()
+            $native = Invoke-Trail 0 $trialArgs
+            $watch.Stop()
+            $nativeMs = $watch.Elapsed.TotalMilliseconds
+            if (-not ($native | Where-Object { $_.type -eq 'result' -and $_.data.RecordId -eq $event.RecordId }) -or
+                -not ($native | Where-Object { $_.type -eq 'result' -and $_.data.Path -eq $log -and $_.data.Line -eq 1 })) {
+                throw 'wtrail-Vergleichsmessung hat nicht beide Originalfundstellen geliefert.'
+            }
+            Write-Host ("Benchmark {0}: rg + Get-WinEvent {1:F1} ms; wtrail {2:F1} ms" -f $trial,$baselineMs,$nativeMs)
+        }
+    }
 }
 finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force
