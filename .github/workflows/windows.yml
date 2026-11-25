@@ -1,0 +1,33 @@
+name: Windows build and acceptance
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish self-contained Windows x64 build
+        shell: pwsh
+        run: dotnet publish -c Release -r win-x64 --self-contained -p:Version=1.0.0-rc.1 -o "$env:RUNNER_TEMP/wtrail-package"
+      - name: Run Windows acceptance
+        shell: pwsh
+        run: ./scripts/Test-Windows.ps1 -Executable "$env:RUNNER_TEMP/wtrail-package/wtrail.exe"
+      - name: Package verified build
+        shell: pwsh
+        run: |
+          Copy-Item README.md "$env:RUNNER_TEMP/wtrail-package/"
+          Compress-Archive "$env:RUNNER_TEMP/wtrail-package/*" wtrail-1.0.0-rc.1-win-x64.zip
+          $zip = Get-Item wtrail-1.0.0-rc.1-win-x64.zip
+          "$((Get-FileHash $zip).Hash.ToLowerInvariant())  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.Name).sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wtrail-1.0.0-rc.1-win-x64
+          path: |
+            wtrail-1.0.0-rc.1-win-x64.zip
+            wtrail-1.0.0-rc.1-win-x64.zip.sha256
