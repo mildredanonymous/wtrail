@@ -30,3 +30,21 @@ ungeprüft. Ein expliziter `--logs`-Pfad hat Vorrang.
 
 Die native Windows-Dienstauflösung, Ereigniskanäle und Windows-spezifischen
 Pfadprüfungen stehen zur Abnahme aus.
+
+## Dateisuche
+
+```powershell
+dotnet run -- search '[ERROR]' 'C:\Anwendung\Logs' --file-glob '*.log' --context 2
+dotnet run -- search '^ERROR\b' 'C:\Anwendung\Logs' --regex --format jsonl
+```
+
+Die Suche ist standardmässig wörtlich, unterscheidet Gross- und Kleinschreibung
+und beginnt ohne Pfadangabe im aktuellen Verzeichnis. `--` beendet die
+Optionsverarbeitung, etwa für ein Suchmuster, das mit `--` beginnt.
+`--context` akzeptiert 0 bis 1000 Zeilen je Seite. Quelldatensätze weisen
+Dateifilter, übersprungene Verknüpfungen und Zugriffsfehler aus. Ein Regex, der
+das Zeitlimit überschreitet, erzeugt eine Suchlücke für die betroffene Datei.
+
+JSONL verwendet die Felder `version`, `type` und `data`. Der letzte Datensatz
+enthält den Exitcode und die Anzahl Treffer. Bei einem verarbeiteten
+`Ctrl+C` endet die Dateisuche mit Code 130.

@@ -7,6 +7,7 @@ return Run(args);
 static int Run(string[] args)
 {
     const string help = """
+        wtrail search PATTERN [PFAD] [--regex] [--file-glob MUSTER] [--context N] [--format jsonl]
         wtrail incident DIENST --since 30m [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident DIENST --from ZEIT --to ZEIT [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident Auftragsimport --demo complete|partial [--from UTC --to UTC]
@@ -16,6 +17,9 @@ static int Run(string[] args)
         Console.WriteLine(help);
         return 0;
     }
+
+    if (args.Length > 0 && args[0] == "search")
+        return FileSearch.Run(args[1..], SafeText, help);
 
     if (args.Length >= 2 && args[0] == "incident" && !args[1].StartsWith("--", StringComparison.Ordinal)
         && (args.Length < 3 || args[2] != "--demo"))

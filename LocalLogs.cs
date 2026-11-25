@@ -1,3 +1,4 @@
+using System.Threading;
 using System.IO.Enumeration;
 using System.Text;
 
@@ -11,8 +12,28 @@ static class LocalLogs
         DateTimeOffset from, DateTimeOffset to, List<Source> sources,
         Action<DateTimeOffset, string, string> emit)
     {
+        Walk(input, glob, sources.Add, (file, reader) =>
+        {
+            long lineNumber = 0;
+            while (reader.ReadLine() is { } line)
+            {
+                lineNumber++;
+                var separator = line.IndexOfAny([' ', '\t']);
+                if (separator > 0 && WindowsIncident.TryTime(line[..separator], out var time) &&
+                    time >= from && time < to &&
+                    (line.AsSpan(separator + 1).Contains(serviceName, StringComparison.OrdinalIgnoreCase) ||
+                     line.AsSpan(separator + 1).Contains(displayName, StringComparison.OrdinalIgnoreCase)))
+                    emit(time, $"{file}:{lineNumber}", line[(separator + 1)..]);
+            }
+        });
+    }
+
+    internal static void Walk(string input, string glob, Action<Source> report,
+        Action<string, StreamReader> scan, CancellationToken cancellation = default)
+    {
         try
         {
+            cancellation.ThrowIfCancellationRequested();
             var (path, attributes) = ResolveLocal(input);
 
             if (attributes.HasFlag(FileAttributes.Directory))
@@ -22,7 +43,7 @@ static class LocalLogs
         }
         catch (Exception error) when (IsPathError(error) || error is ArgumentException or NotSupportedException)
         {
-            sources.Add(new Source(input, false, error.Message));
+            report(new Source(input, false, error.Message));
         }
 
         void ReadDirectory(string start)
@@ -36,6 +57,7 @@ static class LocalLogs
                     CheckAttributes(directory);
                     foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
                     {
+                        cancellation.ThrowIfCancellationRequested();
                         try
                         {
                             var attributes = CheckAttributes(entry);
@@ -46,40 +68,33 @@ static class LocalLogs
                         }
                         catch (Exception error) when (IsPathError(error))
                         {
-                            sources.Add(new Source(entry, false, error.Message));
+                            report(new Source(entry, false, error.Message));
                         }
                     }
 
-                    sources.Add(new Source(directory, true, "Verzeichnis geprüft"));
+                    report(new Source(directory, true, "Verzeichnis geprüft"));
                 }
                 catch (Exception error) when (IsPathError(error))
                 {
-                    sources.Add(new Source(directory, false, error.Message));
+                    report(new Source(directory, false, error.Message));
                 }
             }
         }
 
         void ReadFile(string file)
         {
+            cancellation.ThrowIfCancellationRequested();
             if (!FileSystemName.MatchesSimpleExpression(glob, Path.GetFileName(file), ignoreCase: true))
+            {
+                report(new Source(file, true, $"durch Dateifilter {glob} ausgeschlossen"));
                 return;
+            }
 
             CheckAttributes(file);
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            long lineNumber = 0;
-            while (reader.ReadLine() is { } line)
-            {
-                lineNumber++;
-                var separator = line.IndexOfAny([' ', '\t']);
-                if (separator > 0 && WindowsIncident.TryTime(line[..separator], out var time) &&
-                    time >= from && time < to &&
-                    (line.AsSpan(separator + 1).Contains(serviceName, StringComparison.OrdinalIgnoreCase) ||
-                     line.AsSpan(separator + 1).Contains(displayName, StringComparison.OrdinalIgnoreCase)))
-                    emit(time, $"{file}:{lineNumber}", line[(separator + 1)..]);
-            }
-
-            sources.Add(new Source(file, true, "Datei geprüft"));
+            scan(file, reader);
+            report(new Source(file, true, "Datei geprüft"));
         }
     }
 
