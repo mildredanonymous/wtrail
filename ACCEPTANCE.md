@@ -52,6 +52,12 @@ WinSW-kompatible XML neben dem konfigurierten EXE-Pfad, löste `%BASE%` auf und
 meldete die Konfigurationsquelle. `--logs` hatte Vorrang. Der Dienst wurde
 für die Prüfung der Konfiguration nicht gestartet.
 
+[Windows-CI für Ctrl+C](https://github.com/mildredanonymous/wtrail/actions/runs/45697357471)
+bestanden. Ein natives Windows-Konsolensignal wurde während der laufenden
+JSONL-Ausgabe an `search` und an `incident --demo` gesendet. In beiden Fällen
+blieben alle Zeilen gültiges JSON und der Abschluss sowie der Prozess
+meldeten Exitcode 130. Die interaktive Tastatureingabe in einem
+Windows-11-PowerShell-Fenster wurde dabei nicht geprüft.
+
 Vor der stabilen V1 stehen die Messung von Speicherbedarf und Bedienzeit
-sowie die Abnahme mit einem echten Cloud-Platzhalter und Ctrl+C in PowerShell
-aus.
+sowie die Abnahme mit einem echten Cloud-Platzhalter aus.
