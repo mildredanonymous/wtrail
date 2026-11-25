@@ -1,0 +1,6 @@
+<service>
+  <id>Auftragsimport</id>
+  <name>Auftragsimport (Test)</name>
+  <executable>%BASE%\Auftragsimport.Test.exe</executable>
+  <logpath>%BASE%\logs</logpath>
+</service>

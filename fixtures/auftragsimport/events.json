@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "channel": "System",
+      "provider": "Service Control Manager",
+      "recordId": 4201,
+      "eventId": 7000,
+      "timestamp": "2026-01-15T09:15:02Z",
+      "serviceName": "Auftragsimport",
+      "message": "Der Testdienst Auftragsimport konnte nicht gestartet werden."
+    }
+  ],
+  "scenarios": {
+    "complete": {"System": "checked", "Application": "checked"},
+    "partial": {"System": "checked", "Application": "access_denied"}
+  }
+}
