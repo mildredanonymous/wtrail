@@ -17,7 +17,15 @@ jobs:
         run: dotnet publish -c Release -r win-x64 --self-contained -p:Version=1.0.0-rc.1 -o "$env:RUNNER_TEMP/wtrail-package"
       - name: Install ripgrep for the benchmark
         shell: pwsh
-        run: choco install ripgrep --version=14.1.1 --yes --no-progress
+        run: |
+          $archive = "$env:RUNNER_TEMP/ripgrep.zip"
+          Invoke-WebRequest -Uri 'https://github.com/BurntSushi/ripgrep/releases/download/16.0.0/ripgrep-16.0.0-x86_64-pc-windows-msvc.zip' -OutFile $archive
+          if ((Get-FileHash $archive).Hash -ne 'f418ae83e63046a94a7b5f3a44bf3a169f66e689164856ecee02547131c73931') {
+            throw 'Ripgrep checksum mismatch.'
+          }
+          Expand-Archive $archive "$env:RUNNER_TEMP/ripgrep"
+          (Get-ChildItem "$env:RUNNER_TEMP/ripgrep" -Recurse -Filter rg.exe | Select-Object -First 1).Directory.FullName |
+            Out-File $env:GITHUB_PATH -Append
       - name: Run Windows acceptance
         shell: pwsh
         run: ./scripts/Test-Windows.ps1 -Executable "$env:RUNNER_TEMP/wtrail-package/wtrail.exe" -Benchmark
