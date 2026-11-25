@@ -102,6 +102,61 @@ try {
             Write-Host ("Benchmark {0}: rg + Get-WinEvent {1:F1} ms; wtrail {2:F1} ms" -f $trial,$baselineMs,$nativeMs)
         }
     }
+    $longDirectory = $temporary
+    while ($longDirectory.Length -lt 320) {
+        $longDirectory = Join-Path $longDirectory ('unterordner-' + ('a' * 72))
+    }
+    $null = [IO.Directory]::CreateDirectory($longDirectory)
+    $longLog = Join-Path $longDirectory 'langer-pfad.log'
+    [IO.File]::WriteAllText($longLog, 'lange Fundstelle')
+    $long = Invoke-Trail 0 @('search','lange Fundstelle',$temporary,'--format','jsonl')
+    if (-not ($long | Where-Object { $_.type -eq 'result' -and $_.data.path -eq $longLog })) {
+        throw 'Fundstelle hinter der 260-Zeichen-Grenze fehlt.'
+    }
+
+    $offlineFile = Join-Path $temporary 'offline.log'
+    [IO.File]::WriteAllText($offlineFile, 'Offline-Prüfmarke')
+    $attributes = [IO.File]::GetAttributes($offlineFile)
+    try {
+        [IO.File]::SetAttributes($offlineFile, ($attributes -bor [IO.FileAttributes]::Offline))
+        $offline = Invoke-Trail 3 @('search','Offline-Prüfmarke',$temporary,'--format','jsonl')
+        if (($offline | Where-Object type -eq 'result') -or
+            -not ($offline | Where-Object { $_.type -eq 'source' -and $_.data.path -eq $offlineFile -and -not $_.data.checked })) {
+            throw 'Datei mit Offline-Attribut wurde nicht als Suchlücke übersprungen.'
+        }
+    }
+    finally { [IO.File]::SetAttributes($offlineFile, $attributes) }
+
+    $serviceName = 'wtrail-test-' + [guid]::NewGuid().ToString('N')
+    $wrapper = Join-Path $temporary 'WinSW Test.exe'
+    $config = [IO.Path]::ChangeExtension($wrapper, '.xml')
+    $logDirectory = [IO.Directory]::CreateDirectory((Join-Path $temporary 'WinSW Logs'))
+    $configuredLog = Join-Path $logDirectory.FullName 'wrapper.log'
+    [IO.File]::WriteAllText($configuredLog, "$timestamp ERROR $serviceName")
+    [IO.File]::WriteAllText($config, "<service><id>$serviceName</id><logpath>%BASE%/WinSW Logs</logpath></service>")
+    $null = New-Service -Name $serviceName -BinaryPathName ('"' + $wrapper + '"') -StartupType Disabled
+    try {
+        $serviceArgs = @('incident',$serviceName,'--from',$from.ToString('o'),'--to',$to.ToString('o'),
+            '--channel','Application','--provider','wtrail-smoke','--event-id','901','--format','jsonl')
+        $automatic = Invoke-Trail 0 $serviceArgs
+        if (-not ($automatic | Where-Object { $_.type -eq 'source' -and $_.data.name -eq $config -and $_.data.Checked }) -or
+            -not ($automatic | Where-Object { $_.type -eq 'result' -and $_.data.Path -eq $configuredLog })) {
+            throw 'Automatische WinSW-Auflösung lieferte Konfigurationsquelle oder Logtreffer nicht.'
+        }
+
+        $overrideDirectory = [IO.Directory]::CreateDirectory((Join-Path $temporary 'Explizite Logs'))
+        $overrideLog = Join-Path $overrideDirectory.FullName 'override.log'
+        [IO.File]::WriteAllText($overrideLog, "$timestamp ERROR $serviceName")
+        $explicit = Invoke-Trail 0 ($serviceArgs + @('--logs',$overrideDirectory.FullName))
+        $fileResults = @($explicit | Where-Object { $_.type -eq 'result' -and $_.data.Path })
+        if ($fileResults.Count -ne 1 -or $fileResults[0].data.Path -ne $overrideLog) {
+            throw 'Der explizite Pfad hatte keinen Vorrang.'
+        }
+    }
+    finally { Remove-Service -Name $serviceName }
+
+    Write-Host 'Lange Pfade, Offline-Dateiattribut, automatische WinSW-Auflösung und Vorrang von --logs bestanden.'
+
 }
 finally {
     Remove-Item -LiteralPath $temporary -Recurse -Force
