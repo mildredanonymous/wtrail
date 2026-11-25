@@ -29,6 +29,9 @@ jobs:
       - name: Run Windows acceptance
         shell: pwsh
         run: ./scripts/Test-Windows.ps1 -Executable "$env:RUNNER_TEMP/wtrail-package/wtrail.exe" -Benchmark
+      - name: Test Windows Ctrl+C and JSONL
+        shell: pwsh
+        run: python ./scripts/Test-WindowsCancel.py "$env:RUNNER_TEMP/wtrail-package/wtrail.exe"
       - name: Package verified build
         shell: pwsh
         run: |
