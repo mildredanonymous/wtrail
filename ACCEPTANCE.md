@@ -42,6 +42,16 @@ Beobachtung von Regressionen. Die Messung sagt nichts über grössere Logs,
 unbekannte Logpfade oder die Zeit aus, die eine Person zum Auffinden der
 beiden Quellen benötigt.
 
-Vor der stabilen V1 stehen insbesondere die Messung von Speicherbedarf und
-Bedienzeit sowie die Windows-Prüfung der automatischen WinSW-Auflösung, langer
-Pfade, von Online-Platzhaltern und von Ctrl+C in PowerShell aus.
+## Weitere Windows-Prüfungen
+
+[Windows-CI für Pfade und WinSW](https://github.com/mildredanonymous/wtrail/actions/runs/45696561360)
+bestanden. Die rekursive Suche fand eine Datei hinter der 260-Zeichen-Grenze.
+Eine lokale Datei mit Offline-Attribut wurde vor dem Lesen übersprungen.
+Für einen temporär registrierten, deaktivierten Testdienst fand wtrail die
+WinSW-kompatible XML neben dem konfigurierten EXE-Pfad, löste `%BASE%` auf und
+meldete die Konfigurationsquelle. `--logs` hatte Vorrang. Der Dienst wurde
+für die Prüfung der Konfiguration nicht gestartet.
+
+Vor der stabilen V1 stehen die Messung von Speicherbedarf und Bedienzeit
+sowie die Abnahme mit einem echten Cloud-Platzhalter und Ctrl+C in PowerShell
+aus.
