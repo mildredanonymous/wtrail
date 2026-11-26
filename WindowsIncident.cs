@@ -151,7 +151,7 @@ static class WindowsIncident
         if (logPath is not null)
         {
             LocalLogs.Read(logPath, options.FileGlob ?? "*.log", serviceName, displayName,
-                options.From, options.To, sources, Emit, output.Cancellation);
+                options.From, options.To, sources, Emit, output.Cancellation, output.LogDirectory);
         }
         foreach (var source in sources)
             output.Source(source);

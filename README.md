@@ -46,7 +46,7 @@ The first command reads a real Windows event channel using the built-in Event Lo
 - `--logs` takes a local file or a directory searched recursively. The default file-name filter is `*.log`. Set `--file-glob` to change it. A service-related line with no reliable leading timestamp is marked as undated.
 - Without `--logs`, `wtrail` looks for a same-named WinSW XML file next to the configured service executable. The XML must contain the service's internal ID and one explicit `<logpath>`. Relative paths and `%BASE%` resolve against the XML directory. When discovery fails, the event results remain visible and file coverage is reported as unchecked.
 
-The default order is chronological. `--order found` streams incident results as the sources are scanned. Event results show the channel and record ID. File results show the path and line number.
+The default order is chronological. `--order found` streams incident results as the sources are scanned. The text view puts the message on the first line and the original location on the next. It shows file paths relative to the displayed log directory and ends with a source coverage summary. Add `--verbose` for full paths, precise timestamps, and available provider and event IDs.
 
 ## Search files directly
 
@@ -55,7 +55,7 @@ The default order is chronological. `--order found` streams incident results as 
 .\wtrail.exe search '^ERROR\b' 'C:\Apps\My Service\Logs' --regex --format jsonl
 ```
 
-File search streams results. Patterns are literal and case-sensitive by default. Omit the path to search the current directory recursively. Use `--` before a pattern that starts with `--`. The reader supports UTF-8 and UTF-16 with a byte order mark. The tool reports skipped links, files marked offline, access errors and regex timeouts in the source status.
+File search streams results under one heading per file. The `>` marker identifies matches within context lines. Add `--verbose` for full paths on each result and detailed source status. Patterns are literal and case-sensitive by default. Omit the path to search the current directory recursively. Use `--` before a pattern that starts with `--`. The reader supports UTF-8 and UTF-16 with a byte order mark. The tool reports skipped links, files marked offline, access errors and regex timeouts in the source status.
 
 ## JSON Lines and exit codes
 

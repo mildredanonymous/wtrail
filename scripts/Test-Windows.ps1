@@ -26,6 +26,20 @@ $demo = Invoke-Trail 0 @('incident','Auftragsimport','--demo','complete','--form
 if (@($demo | Where-Object type -eq 'result').Count -ne 2) { throw 'Demo-Fundstellen fehlen.' }
 $null = Invoke-Trail 3 @('incident','Auftragsimport','--demo','partial','--order','found','--format','jsonl')
 
+$timeline = @(& $Executable incident Auftragsimport --demo partial)
+if ($LASTEXITCODE -ne 3 -or
+    -not ($timeline -match '^09:15:01  LOG') -or
+    -not ($timeline -match '^    auftragsimport\.log:2') -or
+    -not ($timeline -match '^    System .* 4201') -or
+    -not ($timeline -match '^  Suchlücke .*Application')) {
+    throw 'Compact timeline or source coverage changed unexpectedly.'
+}
+$details = @(& $Executable incident Auftragsimport --demo complete --verbose)
+if ($LASTEXITCODE -ne 0 -or -not ($details -match '^2026-01-15T09:15:01\.') -or
+    -not ($details -match '^    [A-Z]:.*auftragsimport\.log:2')) {
+    throw 'Verbose timeline did not show the full timestamp and path.'
+}
+
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ("wtrail Prüfung " + [guid]::NewGuid())
 $null = New-Item -ItemType Directory -Path $temporary
 try {
@@ -38,6 +52,11 @@ try {
     $search = Invoke-Trail 0 @('search','[Probe]',$temporary,'--file-glob','*.log','--format','jsonl')
     if (-not ($search | Where-Object { $_.type -eq 'result' -and $_.data.line -eq 1 })) {
         throw 'UTF-16-Fundstelle fehlt.'
+    }
+    $grouped = @(& $Executable search '[Probe]' $temporary --file-glob '*.log')
+    if ($LASTEXITCODE -ne 0 -or @($grouped -match '^träge\.log$').Count -ne 1 -or
+        -not ($grouped -match '^  >\s+1\s+')) {
+        throw 'Grouped file search did not show the file heading and marked line.'
     }
     $null = Invoke-Trail 1 @('search','kein Treffer',$temporary,'--format','jsonl')
     $null = Invoke-Trail 2 @('search','kein Treffer',(Join-Path $temporary 'fehlt'),'--format','jsonl')

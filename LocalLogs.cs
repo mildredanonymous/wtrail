@@ -10,7 +10,7 @@ static class LocalLogs
 
     internal static void Read(string input, string glob, string serviceName, string displayName,
         DateTimeOffset from, DateTimeOffset to, List<Source> sources,
-        Action<IncidentHit> emit, CancellationToken cancellation)
+        Action<IncidentHit> emit, CancellationToken cancellation, Action<string>? onDirectory = null)
     {
         Walk(input, glob, sources.Add, (file, reader) =>
         {
@@ -28,17 +28,18 @@ static class LocalLogs
                 else if (time >= from && time < to)
                     emit(new IncidentHit(time, true, line[(separator + 1)..], Path: file, Line: lineNumber));
             }
-        }, cancellation);
+        }, cancellation, onDirectory);
     }
 
     internal static void Walk(string input, string glob, Action<Source> report,
-        Action<string, StreamReader> scan, CancellationToken cancellation = default)
+        Action<string, StreamReader> scan, CancellationToken cancellation = default, Action<string>? onDirectory = null)
     {
         try
         {
             cancellation.ThrowIfCancellationRequested();
             var (path, attributes) = ResolveLocal(input);
 
+            onDirectory?.Invoke(attributes.HasFlag(FileAttributes.Directory) ? path : Path.GetDirectoryName(path)!);
             if (attributes.HasFlag(FileAttributes.Directory))
                 ReadDirectory(path);
             else

@@ -43,9 +43,10 @@ static class FileSearch
             return Finish(2);
         }
 
-        var (pattern, path, glob, context, regex, formatJson) = options;
+        var (pattern, path, glob, context, regex, formatJson, verbose) = options;
+        string? directory = null;
         json = formatJson;
-        Write("start", new { command = "search", path, glob }, $"Dateisuche in {path} ({glob})");
+        Write("start", new { command = "search", path, glob }, $"Dateisuche · Filter {glob}");
         using var cancellation = new CancellationTokenSource();
         ConsoleCancelEventHandler cancel = (_, signal) =>
         {
@@ -59,8 +60,9 @@ static class FileSearch
             {
                 checkedSources |= source.Checked;
                 gaps |= !source.Checked;
-                Write("source", new { path = source.Name, source.Checked, source.Status },
-                    $"{source.Name} — {source.Status}");
+                if (json || verbose || !source.Checked || source.Status.StartsWith("durch Dateifilter ", StringComparison.Ordinal))
+                    Write("source", new { path = source.Name, source.Checked, source.Status },
+                        $"{(source.Checked ? "  " : "Suchlücke · ")}{source.Name} — {source.Status}");
             }, (file, reader) =>
             {
                 var before = new Queue<(long Number, string Text)>();
@@ -70,8 +72,15 @@ static class FileSearch
 
                 void Print(long lineNumber, string text, bool match)
                 {
-                    Write("result", new { path = file, line = lineNumber, match, text },
-                        $"{file}:{lineNumber}{(match ? ":" : "-")} {text}");
+                    if (!json && !verbose && lastPrinted == 0)
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine(safeText(directory is null ? file : Path.GetRelativePath(directory, file)));
+                    }
+
+                    var display = verbose ? $"{file}:{lineNumber}{(match ? ":" : "-")} {text}"
+                        : $"  {(match ? ">" : " ")} {lineNumber,6}  {text}";
+                    Write("result", new { path = file, line = lineNumber, match, text }, display);
                     lastPrinted = lineNumber;
                 }
 
@@ -109,7 +118,12 @@ static class FileSearch
                 {
                     throw new IOException("Zeitlimit für regulären Ausdruck überschritten.", error);
                 }
-            }, cancellation.Token);
+            }, cancellation.Token, root =>
+            {
+                directory = root;
+                if (!json)
+                    Console.WriteLine(safeText($"Suchordner · {root}"));
+            });
 
             cancellation.Token.ThrowIfCancellationRequested();
             return Finish(gaps ? checkedSources || matches > 0 ? 3 : 2 : matches > 0 ? 0 : 1);
@@ -126,7 +140,7 @@ static class FileSearch
 
     private static bool TryParse(string[] args, out Options options)
     {
-        options = new Options("", ".", "*", 0, null, false);
+        options = new Options("", ".", "*", 0, null, false, false);
         var positional = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var regex = false;
@@ -151,6 +165,12 @@ static class FileSearch
             if (arg == "--regex")
             {
                 regex = true;
+                continue;
+            }
+
+            if (arg == "--verbose")
+            {
+                options = options with { Verbose = true };
                 continue;
             }
 
@@ -190,5 +210,5 @@ static class FileSearch
         }
     }
 
-    private sealed record Options(string Pattern, string Path, string Glob, int Context, Regex? Regex, bool Json);
+    private sealed record Options(string Pattern, string Path, string Glob, int Context, Regex? Regex, bool Json, bool Verbose);
 }

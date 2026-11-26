@@ -8,11 +8,11 @@ return Run(args);
 static int Run(string[] args)
 {
     const string help = """
-        wtrail search PATTERN [PFAD] [--regex] [--file-glob MUSTER] [--context N] [--format jsonl]
+        wtrail search PATTERN [PFAD] [--regex] [--file-glob MUSTER] [--context N] [--verbose] [--format jsonl]
         wtrail incident DIENST --since 30m [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident DIENST --from ZEIT --to ZEIT [--channel KANAL] [--provider NAME] [--event-id ID] [--logs PFAD] [--file-glob MUSTER]
         wtrail incident Auftragsimport --demo complete|partial [--from UTC --to UTC]
-        incident: [--order time|found] [--format jsonl]
+        incident: [--order time|found] [--verbose] [--format jsonl]
         """;
     if (args is ["--help"] or ["incident", "--help"])
     {
@@ -34,19 +34,26 @@ static int RunIncident(string[] args, string help)
     var remaining = new List<string>();
     var json = false;
     var streaming = false;
+    var verbose = false;
     var valid = true;
     var seen = new HashSet<string>();
     if (args.Length > 0)
         remaining.Add(args[0]);
-    for (var index = 1; index < args.Length; index += 2)
+    for (var index = 1; index < args.Length;)
     {
-        var key = args[index];
-        if (index + 1 >= args.Length)
+        var key = args[index++];
+        if (key == "--verbose")
+        {
+            valid &= seen.Add(key);
+            verbose = true;
+            continue;
+        }
+        if (index >= args.Length)
         {
             valid = false;
             break;
         }
-        var value = args[index + 1];
+        var value = args[index++];
         if (key is "--format" or "--order")
         {
             valid &= seen.Add(key);
@@ -69,7 +76,7 @@ static int RunIncident(string[] args, string help)
     var service = args.FirstOrDefault() ?? "";
     var demo = remaining.Count >= 2 && remaining[1] == "--demo";
     using var cancellation = new CancellationTokenSource();
-    var output = new IncidentOutput(json, streaming, SafeText, cancellation.Token);
+    var output = new IncidentOutput(json, streaming, verbose, SafeText, cancellation.Token);
     ConsoleCancelEventHandler cancel = (_, signal) =>
     {
         signal.Cancel = true;
@@ -128,6 +135,7 @@ static int RunDemo(string[] args, IncidentOutput output, string help)
     output.Start(args[0], from, to, true);
 
     var root = Path.Combine(AppContext.BaseDirectory, "fixtures", "auftragsimport");
+    output.LogDirectory(Path.Combine(root, "logs"));
     var count = 0;
     var sources = new List<Source>();
     try
